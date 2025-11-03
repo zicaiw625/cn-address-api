@@ -167,6 +167,35 @@ def _fix_municipality_city(province: Optional[str],
     return city
 
 
+def _same_admin_area(current_province: Optional[str],
+                     current_city: Optional[str],
+                     current_district: Optional[str],
+                     target: Optional[Dict[str, Any]]) -> bool:
+    if not target:
+        return False
+
+    tgt_province = target.get("province")
+    tgt_city = _fix_municipality_city(tgt_province, target.get("city"))
+    tgt_district = target.get("district")
+
+    cur_city = _fix_municipality_city(current_province, current_city)
+
+    province_match = (
+        bool(current_province and tgt_province)
+        and current_province == tgt_province
+    )
+    city_match = (
+        bool(cur_city and tgt_city)
+        and cur_city == tgt_city
+    )
+    district_match = (
+        bool(current_district and tgt_district)
+        and current_district == tgt_district
+    )
+
+    return province_match and city_match and district_match
+
+
 def _detail_level(street: str) -> str:
     if _UNIT_LEVEL_RE.search(street):
         return "unit"
@@ -288,14 +317,23 @@ def parse_address(raw_address: str) -> ParseResponse:
 
     # 6. 邮编反查（不管前面有没有 district，我们都要拿它做 same_area 判断）
     via_postal = _lookup_postal_info(input_postal, postal_index)
-    if via_postal and district is None:
-        # 如果我们还没识别到区县，用邮编兜底
-        province = province or via_postal.get("province")
-        city = city or via_postal.get("city")
-        district = district or via_postal.get("district")
-        lat = lat or via_postal.get("lat")
-        lng = lng or via_postal.get("lng")
-        admin_postal = admin_postal or via_postal.get("postal_code")
+    if via_postal:
+        if district is None:
+            # 如果我们还没识别到区县，用邮编兜底
+            province = province or via_postal.get("province")
+            city = city or via_postal.get("city")
+            district = district or via_postal.get("district")
+            lat = lat or via_postal.get("lat")
+            lng = lng or via_postal.get("lng")
+            admin_postal = admin_postal or via_postal.get("postal_code")
+        elif not _same_admin_area(province, city, district, via_postal):
+            # 如果别名命中了其他同名区域，但邮编指向更精确的行政区，则以邮编为准
+            province = via_postal.get("province") or province
+            city = via_postal.get("city") or city
+            district = via_postal.get("district") or district
+            lat = via_postal.get("lat") or lat
+            lng = via_postal.get("lng") or lng
+            admin_postal = via_postal.get("postal_code") or admin_postal
 
     # 7. 直辖市修正
     city = _fix_municipality_city(province, city)
