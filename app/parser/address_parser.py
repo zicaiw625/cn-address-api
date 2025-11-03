@@ -376,6 +376,29 @@ def _build_normalized_en(street: str,
     return " , ".join([p for p in parts if p])
 
 
+def _strip_leading_tokens(text: str, tokens: List[str]) -> str:
+    """
+    Remove known行政区别名，仅当它们位于字符串开头时才剥离，
+    避免把“浙江大学”这类合法地名中的“浙江”误删。
+    """
+    if not text:
+        return text
+    if not tokens:
+        return text
+
+    sorted_tokens = sorted({t for t in tokens if t}, key=len, reverse=True)
+    work = text
+    stripped = True
+    while stripped and work:
+        stripped = False
+        for token in sorted_tokens:
+            if work.startswith(token):
+                work = work[len(token):]
+                stripped = True
+                break
+    return work
+
+
 def parse_address(raw_address: str) -> ParseResponse:
     (
         alias_index,
@@ -545,18 +568,13 @@ def parse_address(raw_address: str) -> ParseResponse:
 
     # 8. street 清洗：去掉省/市/区 + 它们的简称
     street_candidate = work_str
-    for token in [province, city, district]:
-        if token and token in street_candidate:
-            street_candidate = street_candidate.replace(token, "")
     aliases_for_strip = build_aliases_for_names(
         province=province,
         city=city,
         district=district,
     )
-    for alias in aliases_for_strip:
-        if alias and alias in street_candidate:
-            street_candidate = street_candidate.replace(alias, "")
-    street = street_candidate.strip()
+    tokens_for_strip = list(filter(None, [province, city, district])) + aliases_for_strip
+    street = _strip_leading_tokens(street_candidate, tokens_for_strip).strip()
 
     # 9. 邮编决策（在 divisions_cn.json 没细分邮编的情况下，尽量别误报 mismatch）
     #

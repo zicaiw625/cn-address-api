@@ -8,7 +8,7 @@ PHONE_REGEX = re.compile(r'(1[3-9]\d{9})')
 POSTAL_REGEX = re.compile(r'(\d{6})')
 
 # simple cleanup for separators
-SEPARATORS = [',', '，', ';', '；', '。', '|', '/', '\\n', '\\r', '\\t']
+SEPARATORS = [',', '，', ';', '；', '。', '|', '/', '\n', '\r', '\t']
 
 
 def clean_text(text: str) -> str:

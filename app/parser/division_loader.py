@@ -173,8 +173,8 @@ def _build_indexes_from_tree(
                         }
                     )
 
-                if postal_code and postal_code not in postal_index:
-                    postal_entry = {
+                if postal_code:
+                    entry = {
                         "province": prov_name,
                         "city": city_name,
                         "district": dist_name,
@@ -182,22 +182,13 @@ def _build_indexes_from_tree(
                         "lat": lat,
                         "lng": lng,
                     }
-                    postal_index[postal_code] = postal_entry
-
-                if postal_code:
+                    postal_index.setdefault(postal_code, entry)
                     prefix = postal_code[:3]
                     postal_prefix_index.setdefault(prefix, []).append(
-                        {
-                            "province": prov_name,
-                            "city": city_name,
-                            "district": dist_name,
-                            "postal_code": postal_code,
-                            "lat": lat,
-                            "lng": lng,
-                        }
+                        entry.copy()
                     )
 
-                    province_postal_index.setdefault(prov_name, postal_entry)
+                    province_postal_index.setdefault(prov_name, entry.copy())
 
     return alias_index, postal_index, postal_prefix_index, province_postal_index
 

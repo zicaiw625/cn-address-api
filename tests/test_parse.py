@@ -89,3 +89,56 @@ def test_parse_postal_adjacent_to_chinese_characters():
 
     assert result["postal_code"] == "310052"
     assert result["postal_mismatch"] is False
+
+
+def test_street_preserves_embedded_place_names():
+    raw = "浙江省杭州市西湖区浙江大学玉泉校区张三 15900001234 310000"
+    result = parse_address(raw)
+
+    assert result["province"] == "浙江省"
+    assert result["city"] == "杭州市"
+    assert result["district"] == "西湖区"
+    assert "浙江大学" in (result["street"] or "")
+    assert result["recipient"] == "张三"
+
+
+def test_province_postal_index_uses_local_entry():
+    from app.parser.division_loader import _build_indexes_from_tree
+
+    sample_tree = {
+        "省A": {
+            "_pinyin": "ShengA",
+            "市A": {
+                "_pinyin": "ShiA",
+                "区A": {
+                    "_pinyin": "QuA",
+                    "postal_code": "123456",
+                    "center": [10, 20],
+                }
+            }
+        },
+        "省B": {
+            "_pinyin": "ShengB",
+            "市B": {
+                "_pinyin": "ShiB",
+                "区B": {
+                    "_pinyin": "QuB",
+                    "postal_code": "123456",
+                    "center": [30, 40],
+                }
+            }
+        }
+    }
+
+    _, _, _, province_postal_index = _build_indexes_from_tree(sample_tree)
+    assert province_postal_index["省A"]["province"] == "省A"
+    assert province_postal_index["省B"]["province"] == "省B"
+
+
+def test_clean_text_handles_control_characters():
+    from app.parser.rules import clean_text
+
+    raw = "浙江省杭州市\n滨江区长河街道\t江南大道"
+    cleaned = clean_text(raw)
+    assert "\n" not in cleaned
+    assert "\t" not in cleaned

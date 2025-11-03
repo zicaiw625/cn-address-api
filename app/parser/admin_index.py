@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from typing import Dict, Tuple, Any, List
-from .division_loader import load_divisions
+from .division_loader import load_divisions_tree
 
 
 # 常见行政区后缀。用户写地址时往往会省略这些后缀，
@@ -63,7 +63,7 @@ def get_indexes() -> Dict[str, Any]:
     这种“以区县为锚点逐级回填省市”的做法在中文地址归一化研究里是标准手段，
     因为用户往往写的是最具体的区县/镇名称，而不是完整省市全称。:contentReference[oaicite:5]{index=5}
     """
-    divisions = load_divisions()
+    divisions = load_divisions_tree()
 
     province_index: Dict[str, str] = {}
     city_index: Dict[str, Tuple[str, str]] = {}

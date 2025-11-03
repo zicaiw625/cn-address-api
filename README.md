@@ -131,14 +131,6 @@ For production you can bake this into a container image and run behind any rever
 
 Scale-out: put it behind nginx / load balancer, add rate limit and auth headers, then publish on RapidAPI as a paid tier.
 
-### RapidAPI launch checklist
-
-- **Auth**: set `API_KEYS` (comma-separated) in your hosting environment so RapidAPI traffic requires `X-API-Key`.
-- **Health**: expose `GET /health` publicly and wire it as the RapidAPI monitoring ping.
-- **Tests**: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && pytest` before each deploy.
-- **Docs**: copy the request/response examples above into your RapidAPI endpoint description, including error (401) scenarios.
-- **SLA**: decide on pricing tiers, rate limits, and contact email before submitting for RapidAPI review.
-
 ---
 
 ## Roadmap ideas (build your paid tiers)
