@@ -1,5 +1,5 @@
 import re
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Set
 
 from pypinyin import lazy_pinyin
 
@@ -13,11 +13,81 @@ _DIRECT_MUNICIPALITIES = {"北京市", "上海市", "天津市", "重庆市"}
 
 _MOBILE_RE = re.compile(r"(1[3-9]\d{9})")
 _POSTAL_RE = re.compile(r"\b(\d{6})\b")
-_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})")
+_NAME_MARKER_RE = re.compile(
+    r"(?:收货?人|收件人|联系人|联络人|寄件人|取件人|收)\s*[:：]?\s*([\u4e00-\u9fa5]{2,4})(?:先生|女士|小姐|老师)?\s*$"
+)
+_NAME_SUFFIX_MARKER_RE = re.compile(
+    r"([\u4e00-\u9fa5]{2,4})(?:先生|女士|小姐|老师)?\s*(?:收货?人|收件人|收)\s*$"
+)
+_TRAILING_NAME_RE = re.compile(
+    r"(?:^|[\s,，;；/|])([\u4e00-\u9fa5]{2,4})(?:先生|女士|小姐|老师)?(?=\s*(?:$|1[3-9]\d{7,10}|\d{7,}|$))"
+)
+_NAME_TOKEN_RE = re.compile(r"^[\u4e00-\u9fa5]{2,4}$")
+_DIGIT_TOKEN_RE = re.compile(r"^\d{7,}$")
+_ADDRESS_SUFFIXES = (
+    "省",
+    "市",
+    "区",
+    "县",
+    "旗",
+    "州",
+    "盟",
+    "镇",
+    "乡",
+    "村",
+    "街",
+    "街道",
+    "路",
+    "大道",
+    "道",
+    "巷",
+    "弄",
+    "里",
+    "号",
+    "院",
+    "幢",
+    "栋",
+    "楼",
+    "单元",
+    "室",
+    "庄",
+    "湾",
+    "山",
+    "岭",
+    "社区",
+    "小区",
+    "花园",
+    "大厦",
+    "中心",
+    "广场",
+    "市场",
+    "商场",
+    "公寓",
+    "公司",
+    "学校",
+    "学院",
+    "大学",
+    "中学",
+    "小学",
+    "幼儿园",
+    "公园",
+    "工业园",
+    "产业园",
+    "科技园",
+    "园区",
+    "软件园",
+    "基地",
+    "厂",
+    "仓",
+    "景区",
+)
 
 _BUILDING_LEVEL_RE = re.compile(r"(号楼|幢|栋|楼)")
 _UNIT_LEVEL_RE = re.compile(r"(单元|室|(?<!号)号(?!楼))")
 
+_MAINLAND_PROVINCE_KEYWORDS = [
+    "省", "市", "自治区", "维吾尔自治区", "壮族自治区", "回族自治区", "内蒙古自治区", "特别行政区",
+]
 _MAINLAND_WHITELIST_PREFIX = [
     "北京", "上海", "天津", "重庆",
     "河北", "山西", "辽宁", "吉林", "黑龙江",
@@ -26,19 +96,6 @@ _MAINLAND_WHITELIST_PREFIX = [
     "四川", "贵州", "云南", "西藏", "陕西", "甘肃",
     "青海", "宁夏", "新疆", "内蒙古",
     # 不含台湾/香港/澳门，避免“云林县 西螺镇”压过“河南 郑州 二七区”
-]
-
-_CONTEXT_SUFFIXES = [
-    "特别行政区",
-    "自治区",
-    "地区",
-    "省",
-    "市",
-    "区",
-    "县",
-    "州",
-    "盟",
-    "旗",
 ]
 
 
@@ -64,71 +121,42 @@ def _extract_postal(addr: str) -> Tuple[str, Optional[str]]:
     return addr_wo, postal_code
 
 
-def _context_tokens(name: Optional[str]) -> List[str]:
-    if not name:
-        return []
-    tokens = {name}
-    for suf in _CONTEXT_SUFFIXES:
-        if name.endswith(suf) and len(name) > len(suf):
-            tokens.add(name[: -len(suf)])
-    return list(tokens)
-
-
-def _context_score(address_core: str,
-                   province: Optional[str],
-                   city: Optional[str],
-                   district: Optional[str]) -> int:
-    score = 0
-    if province:
-        if any(tok and tok in address_core for tok in _context_tokens(province)):
-            score += 3
-    if city:
-        if any(tok and tok in address_core for tok in _context_tokens(city)):
-            score += 2
-    if district:
-        if any(tok and tok in address_core for tok in _context_tokens(district)):
-            score += 1
-    return score
-
-
-_NAME_PRECEDING_DELIMS = set(" ,，;；。:：/|\\-()[]{}<>")
-_NAME_FOLLOWING_DELIMS = _NAME_PRECEDING_DELIMS.union({"#", "+", "&"})
-
-
-def _is_potential_name_context(addr: str, start: int, end: int) -> bool:
-    """Only treat the match as a name when surrounded by explicit separators."""
-    if start == 0:
-        before_ok = True
-    else:
-        before_char = addr[start - 1]
-        before_ok = before_char.isspace() or before_char in _NAME_PRECEDING_DELIMS
-
-    if end >= len(addr):
-        after_ok = True
-    else:
-        after_char = addr[end]
-        after_ok = (
-            after_char.isspace()
-            or after_char.isdigit()
-            or after_char in _NAME_FOLLOWING_DELIMS
-        )
-    return before_ok and after_ok
+def _looks_like_place(name: str) -> bool:
+    return any(name.endswith(suffix) for suffix in _ADDRESS_SUFFIXES)
 
 
 def _extract_name(addr: str) -> Tuple[str, Optional[str]]:
-    matches = list(_NAME_RE.finditer(addr))
-    if not matches:
-        return addr, None
+    for pattern in (_NAME_MARKER_RE, _NAME_SUFFIX_MARKER_RE):
+        match = pattern.search(addr)
+        if match:
+            candidate = match.group(1)
+            if _looks_like_place(candidate):
+                continue
+            start, end = match.span()
+            cleaned = (addr[:start] + " " + addr[end:]).strip()
+            return cleaned, candidate
 
-    for match in reversed(matches):
-        name_guess = match.group(1)
-        if name_guess.endswith(("省", "市", "区", "县", "镇", "乡", "村")):
-            continue
-        start, end = match.span(1)
-        if not _is_potential_name_context(addr, start, end):
-            continue
-        addr_wo = addr[:start] + " " + addr[end:]
-        return addr_wo, name_guess
+    match = _TRAILING_NAME_RE.search(addr)
+    if match:
+        candidate = match.group(1)
+        if not _looks_like_place(candidate):
+            start, end = match.span(1)
+            cleaned = (addr[:start] + " " + addr[end:]).strip()
+            return cleaned, candidate
+
+    tokens = [t for t in re.split(r"[\s,，;；/|]+", addr) if t]
+    if len(tokens) >= 2:
+        maybe_tail = tokens[-1]
+        maybe_name = tokens[-2]
+        if (
+            _DIGIT_TOKEN_RE.match(maybe_tail)
+            and _NAME_TOKEN_RE.match(maybe_name)
+            and not _looks_like_place(maybe_name)
+        ):
+            idx = addr.rfind(maybe_name)
+            if idx != -1:
+                cleaned = (addr[:idx] + " " + addr[idx + len(maybe_name):]).strip()
+                return cleaned, maybe_name
 
     return addr, None
 
@@ -136,59 +164,106 @@ def _extract_name(addr: str) -> Tuple[str, Optional[str]]:
 def _is_mainland_province_name(name: Optional[str]) -> bool:
     if not name:
         return False
-    if any(token in name for token in ("澳门", "香港", "台湾")):
-        return False
-    if name in _DIRECT_MUNICIPALITIES:
-        return True
-    if "特别行政区" in name:
-        return False
-    if ("省" in name) or ("自治区" in name):
-        return True
-    if any(name.startswith(p) for p in _MAINLAND_WHITELIST_PREFIX):
-        return True
-    return False
+    return any(name.startswith(p) for p in _MAINLAND_WHITELIST_PREFIX)
 
 
-def _best_alias_hit(address_core: str,
-                    alias_index: Dict[str, List[Dict[str, Any]]]
-                    ) -> Optional[Dict[str, Any]]:
-    """
-    优先大陆行政区：
-    1. mainland_priority (大陆=1, 其他=0)
-    2. 匹配别名长度(越长越好)
-    3. 行政级别优先 district > city > province
+def _collect_alias_hits(
+    address_core: str,
+    alias_index: Dict[str, List[Dict[str, Any]]]
+) -> Tuple[List[Dict[str, Any]], Set[str], Set[str]]:
+    alias_hits: List[Dict[str, Any]] = []
+    provinces_in_addr: Set[str] = set()
+    cities_in_addr: Set[str] = set()
 
-    这样“河南郑州二七…450052”会解析为
-    河南省/郑州市/二七区（区划代码410103，公开邮编常见为450052），
-    而不会被台湾云林县西螺镇一类的候选盖掉。:contentReference[oaicite:11]{index=11}
-    """
-    candidates: List[Tuple[int, int, int, int, Dict[str, Any]]] = []
     for alias, infos in alias_index.items():
-        if alias and alias in address_core:
-            for info in infos:
-                level_priority = {"district": 3, "city": 2, "province": 1}.get(
-                    info["level"], 0
-                )
-                mainland_priority = 1 if _is_mainland_province_name(
-                    info.get("province")
-                ) else 0
-                context_score = _context_score(
-                    address_core,
-                    info.get("province"),
-                    info.get("city"),
-                    info.get("district"),
-                )
-                candidates.append((
-                    mainland_priority,
-                    context_score,
-                    len(alias),
-                    level_priority,
-                    info,
-                ))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: (x[0], x[1], x[2], x[3]), reverse=True)
-    return candidates[0][4]
+        if not alias or alias not in address_core:
+            continue
+        for info in infos:
+            level = info.get("level")
+            alias_hits.append({
+                "alias": alias,
+                "info": info,
+                "level": level,
+            })
+            if level == "province" and info.get("province"):
+                provinces_in_addr.add(info["province"])
+            elif level == "city" and info.get("city"):
+                cities_in_addr.add(info["city"])
+
+    return alias_hits, provinces_in_addr, cities_in_addr
+
+
+def _pick_best_hit(
+    alias_hits: List[Dict[str, Any]],
+    level: str,
+    provinces_in_addr: Set[str],
+    cities_in_addr: Set[str],
+    required_province: Optional[str] = None,
+    required_city: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    best: Optional[Dict[str, Any]] = None
+    best_score: Optional[Tuple[int, int]] = None
+
+    for hit in alias_hits:
+        if hit["level"] != level:
+            continue
+
+        info = hit["info"]
+        province = info.get("province")
+        city = info.get("city")
+
+        if required_province and province and province != required_province:
+            continue
+        if required_city and city and city != required_city:
+            continue
+        if provinces_in_addr and province and province not in provinces_in_addr:
+            continue
+
+        mainland_priority = 1 if _is_mainland_province_name(province) else 0
+        city_match = 1
+        if cities_in_addr:
+            if city and city in cities_in_addr:
+                city_match = 1
+            else:
+                city_match = 0
+        score = (
+            mainland_priority,
+            city_match,
+            len(hit["alias"]),
+        )
+
+        if (best is None) or (score > (best_score or (-1, -1))):
+            best = info
+            best_score = score
+
+    return best
+
+
+def _pick_postal_prefix_candidate(
+    candidates: List[Dict[str, Any]],
+    province: Optional[str],
+    city: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    best: Optional[Dict[str, Any]] = None
+    best_score: Optional[Tuple[int, int, int, int]] = None
+
+    for info in candidates:
+        prov = info.get("province")
+        city_name = info.get("city")
+        district = info.get("district")
+
+        score = (
+            1 if province and prov and prov == province else 0,
+            1 if city and city_name and city_name == city else 0,
+            1 if district else 0,
+            1 if _is_mainland_province_name(prov) else 0,
+        )
+
+        if (best is None) or (score > (best_score or (-1, -1, -1, -1))):
+            best = info
+            best_score = score
+
+    return best
 
 
 def _lookup_postal_info(postal_code: Optional[str],
@@ -213,35 +288,6 @@ def _fix_municipality_city(province: Optional[str],
         if (city is None) or (city in ["市辖区", "市辖县", "县", "区"]):
             return province
     return city
-
-
-def _same_admin_area(current_province: Optional[str],
-                     current_city: Optional[str],
-                     current_district: Optional[str],
-                     target: Optional[Dict[str, Any]]) -> bool:
-    if not target:
-        return False
-
-    tgt_province = target.get("province")
-    tgt_city = _fix_municipality_city(tgt_province, target.get("city"))
-    tgt_district = target.get("district")
-
-    cur_city = _fix_municipality_city(current_province, current_city)
-
-    province_match = (
-        bool(current_province and tgt_province)
-        and current_province == tgt_province
-    )
-    city_match = (
-        bool(cur_city and tgt_city)
-        and cur_city == tgt_city
-    )
-    district_match = (
-        bool(current_district and tgt_district)
-        and current_district == tgt_district
-    )
-
-    return province_match and city_match and district_match
 
 
 def _detail_level(street: str) -> str:
@@ -330,7 +376,12 @@ def _build_normalized_en(street: str,
 
 
 def parse_address(raw_address: str) -> ParseResponse:
-    alias_index, postal_index = get_indexes()
+    (
+        alias_index,
+        postal_index,
+        postal_prefix_index,
+        province_postal_index,
+    ) = get_indexes()
 
     work_str = raw_address.strip()
 
@@ -346,8 +397,11 @@ def parse_address(raw_address: str) -> ParseResponse:
     # 4. 去空白
     work_str = _strip_spaces(work_str)
 
-    # 5. 行政区命中（别名匹配，带大陆优先）
-    hit = _best_alias_hit(work_str, alias_index)
+    # 5. 行政区命中（先收集全部别名，再按层级择优）
+    alias_hits, provinces_in_addr, cities_in_addr = _collect_alias_hits(
+        work_str, alias_index
+    )
+
     province = None
     city = None
     district = None
@@ -355,63 +409,135 @@ def parse_address(raw_address: str) -> ParseResponse:
     lng = None
     admin_postal = None  # 行政区主邮编(区级默认)
 
-    if hit:
-        province = hit.get("province") or province
-        city = hit.get("city") or city
-        district = hit.get("district") or district
-        lat = hit.get("lat") or lat
-        lng = hit.get("lng") or lng
-        admin_postal = hit.get("postal_code") or admin_postal
+    district_hit = _pick_best_hit(
+        alias_hits=alias_hits,
+        level="district",
+        provinces_in_addr=provinces_in_addr,
+        cities_in_addr=cities_in_addr,
+    )
+    if district_hit:
+        province = district_hit.get("province") or province
+        city = district_hit.get("city") or city
+        district = district_hit.get("district") or district
+        lat = district_hit.get("lat") or lat
+        lng = district_hit.get("lng") or lng
+        admin_postal = district_hit.get("postal_code") or admin_postal
+
+    city_hit = _pick_best_hit(
+        alias_hits=alias_hits,
+        level="city",
+        provinces_in_addr=provinces_in_addr,
+        cities_in_addr=cities_in_addr,
+        required_province=province,
+    )
+    if city_hit:
+        province = city_hit.get("province") or province
+        city = city_hit.get("city") or city
+
+    if district is None and city:
+        district_from_city = _pick_best_hit(
+            alias_hits=alias_hits,
+            level="district",
+            provinces_in_addr=provinces_in_addr,
+            cities_in_addr=cities_in_addr,
+            required_province=province,
+            required_city=city,
+        )
+        if district_from_city:
+            district = district_from_city.get("district") or district
+            lat = lat or district_from_city.get("lat")
+            lng = lng or district_from_city.get("lng")
+            admin_postal = admin_postal or district_from_city.get("postal_code")
+
+    if province is None:
+        province_hit = _pick_best_hit(
+            alias_hits=alias_hits,
+            level="province",
+            provinces_in_addr=provinces_in_addr,
+            cities_in_addr=cities_in_addr,
+        )
+        if province_hit:
+            province = province_hit.get("province") or province
 
     # 6. 邮编反查（不管前面有没有 district，我们都要拿它做 same_area 判断）
-    postal_conflict = False
     via_postal = _lookup_postal_info(input_postal, postal_index)
+    postal_conflict = False
     if via_postal:
-        same_area_pre = _same_admin_area(province, city, district, via_postal)
+        postal_province = via_postal.get("province")
+        postal_city = _fix_municipality_city(
+            postal_province, via_postal.get("city")
+        )
+        postal_district = via_postal.get("district")
 
-        if same_area_pre:
+        conflict = False
+        if province and postal_province and province != postal_province:
+            conflict = True
+        if city and postal_city and city != postal_city:
+            conflict = True
+        if district and postal_district and district != postal_district:
+            conflict = True
+
+        if not conflict:
+            province = province or postal_province
+            city = city or postal_city
+            district = district or postal_district
             lat = lat or via_postal.get("lat")
             lng = lng or via_postal.get("lng")
             admin_postal = admin_postal or via_postal.get("postal_code")
         else:
-            postal_context_score = _context_score(
-                work_str,
-                via_postal.get("province"),
-                via_postal.get("city"),
-                via_postal.get("district"),
-            )
-            allow_update = (
-                (postal_context_score > 0)
-                or (province is None and city is None and district is None)
-            )
-            updated = False
-            if allow_update:
-                if district is None and via_postal.get("district"):
-                    province = via_postal.get("province") or province
-                    city = via_postal.get("city") or city
-                    district = via_postal.get("district")
-                    lat = via_postal.get("lat") or lat
-                    lng = via_postal.get("lng") or lng
-                    admin_postal = admin_postal or via_postal.get("postal_code")
-                    updated = True
-                elif city is None and via_postal.get("city"):
-                    province = via_postal.get("province") or province
-                    city = via_postal.get("city")
-                    lat = via_postal.get("lat") or lat
-                    lng = via_postal.get("lng") or lng
-                    admin_postal = admin_postal or via_postal.get("postal_code")
-                    updated = True
-                elif province is None and via_postal.get("province"):
-                    province = via_postal.get("province")
-                    lat = lat or via_postal.get("lat")
-                    lng = lng or via_postal.get("lng")
-                    admin_postal = admin_postal or via_postal.get("postal_code")
-                    updated = True
+            postal_conflict = True
 
-            if updated:
-                admin_postal = admin_postal or via_postal.get("postal_code")
-            else:
-                postal_conflict = bool(input_postal)
+    # 6.1 邮编前三位兜底（当邮编不在索引里时，用前三位判断省份是否冲突）
+    prefix_info = None
+    prefix_candidates: List[Dict[str, Any]] = []
+    if input_postal:
+        prefix_candidates = postal_prefix_index.get(input_postal[:3], [])
+        if prefix_candidates:
+            prefix_info = _pick_postal_prefix_candidate(
+                prefix_candidates,
+                province=province,
+                city=city,
+            )
+
+            if not any([province, city, district]) and prefix_info:
+                province = prefix_info.get("province") or province
+                city = prefix_info.get("city") or city
+                district = prefix_info.get("district") or district
+                lat = lat or prefix_info.get("lat")
+                lng = lng or prefix_info.get("lng")
+                admin_postal = admin_postal or prefix_info.get("postal_code")
+            elif prefix_info:
+                conflict = False
+                pref_province = prefix_info.get("province")
+                pref_city = prefix_info.get("city")
+                pref_district = prefix_info.get("district")
+                if province and pref_province and province != pref_province:
+                    conflict = True
+                if city and pref_city and city != pref_city:
+                    conflict = True
+                if district and pref_district and district != pref_district:
+                    conflict = True
+                if conflict:
+                    postal_conflict = True
+                elif not admin_postal:
+                    admin_postal = prefix_info.get("postal_code") or admin_postal
+
+            if not postal_conflict and prefix_candidates and prefix_info is None:
+                candidate_provinces = {
+                    info.get("province")
+                    for info in prefix_candidates
+                    if info.get("province")
+                }
+                if province and candidate_provinces and province not in candidate_provinces:
+                    postal_conflict = True
+
+    province_postal_entry = province_postal_index.get(province) if province else None
+    if province_postal_entry and not admin_postal:
+        admin_postal = province_postal_entry.get("postal_code") or admin_postal
+        if not lat:
+            lat = province_postal_entry.get("lat") or lat
+        if not lng:
+            lng = province_postal_entry.get("lng") or lng
 
     # 7. 直辖市修正
     city = _fix_municipality_city(province, city)
@@ -489,8 +615,18 @@ def parse_address(raw_address: str) -> ParseResponse:
         postal_code_final = admin_postal
         postal_mismatch = False
     elif input_postal and not admin_postal:
-        postal_code_final = input_postal
-        postal_mismatch = postal_conflict
+        if postal_conflict:
+            if province_postal_entry:
+                postal_code_final = province_postal_entry.get("postal_code")
+            else:
+                postal_code_final = None
+            postal_mismatch = True
+        else:
+            postal_code_final = input_postal
+            if province and not _is_mainland_province_name(province):
+                postal_mismatch = True
+            else:
+                postal_mismatch = False
     else:
         postal_code_final = None
         postal_mismatch = False
