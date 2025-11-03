@@ -14,6 +14,10 @@ _DIRECT_MUNICIPALITIES = {"北京市", "上海市", "天津市", "重庆市"}
 _MOBILE_RE = re.compile(r"(1[3-9]\d{9})")
 # Postal code often sticks to Chinese chars, so use digit lookarounds instead of \b
 _POSTAL_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+_POSTAL_WITH_LABEL_RE = re.compile(
+    r"(?:邮编|邮政编码|邮编号码|邮政代号)[:：]?\s*(\d{6})",
+    re.IGNORECASE,
+)
 _NAME_MARKER_RE = re.compile(
     r"(?:收货?人|收件人|联系人|联络人|寄件人|取件人|收)\s*[:：]?\s*([\u4e00-\u9fa5]{2,4})(?:先生|女士|小姐|老师)?\s*$"
 )
@@ -85,6 +89,7 @@ _ADDRESS_SUFFIXES = (
 
 _BUILDING_LEVEL_RE = re.compile(r"(号楼|幢|栋|楼)")
 _UNIT_LEVEL_RE = re.compile(r"(单元|室|(?<!号)号(?!楼))")
+_NAME_BLACKLIST = {"邮编", "邮政编码", "邮政代号", "邮编号码"}
 
 _MAINLAND_PROVINCE_KEYWORDS = [
     "省", "市", "自治区", "维吾尔自治区", "壮族自治区", "回族自治区", "内蒙古自治区", "特别行政区",
@@ -114,11 +119,21 @@ def _extract_phone(addr: str) -> Tuple[str, Optional[str]]:
 
 
 def _extract_postal(addr: str) -> Tuple[str, Optional[str]]:
+    labeled = list(_POSTAL_WITH_LABEL_RE.finditer(addr))
+    if labeled:
+        match = labeled[-1]
+        postal_code = match.group(1)
+        start, end = match.span()
+        addr_wo = (addr[:start] + " " + addr[end:]).strip()
+        return addr_wo, postal_code
+
     matches = list(_POSTAL_RE.finditer(addr))
     if not matches:
         return addr, None
-    postal_code = matches[-1].group(1)
-    addr_wo = addr.replace(postal_code, " ")
+    match = matches[-1]
+    postal_code = match.group(1)
+    start, end = match.span(1)
+    addr_wo = (addr[:start] + " " + addr[end:]).strip()
     return addr_wo, postal_code
 
 
@@ -135,6 +150,8 @@ def _extract_name(addr: str) -> Tuple[str, Optional[str]]:
                 continue
             start, end = match.span()
             cleaned = (addr[:start] + " " + addr[end:]).strip()
+            if candidate in _NAME_BLACKLIST:
+                return _extract_name(cleaned)
             return cleaned, candidate
 
     match = _TRAILING_NAME_RE.search(addr)
@@ -143,6 +160,8 @@ def _extract_name(addr: str) -> Tuple[str, Optional[str]]:
         if not _looks_like_place(candidate):
             start, end = match.span(1)
             cleaned = (addr[:start] + " " + addr[end:]).strip()
+            if candidate in _NAME_BLACKLIST:
+                return _extract_name(cleaned)
             return cleaned, candidate
 
     tokens = [t for t in re.split(r"[\s,，;；/|]+", addr) if t]
@@ -157,6 +176,8 @@ def _extract_name(addr: str) -> Tuple[str, Optional[str]]:
             idx = addr.rfind(maybe_name)
             if idx != -1:
                 cleaned = (addr[:idx] + " " + addr[idx + len(maybe_name):]).strip()
+                if maybe_name in _NAME_BLACKLIST:
+                    return _extract_name(cleaned)
                 return cleaned, maybe_name
 
     return addr, None
@@ -414,6 +435,10 @@ def parse_address(raw_address: str) -> ParseResponse:
 
     # 2. 用户邮编
     work_str, input_postal = _extract_postal(work_str)
+    if input_postal:
+        for marker in ("邮编", "邮政编码", "邮政代号", "邮编号码"):
+            if marker in work_str:
+                work_str = work_str.replace(marker, " ")
 
     # 3. 收件人
     work_str, recipient = _extract_name(work_str)

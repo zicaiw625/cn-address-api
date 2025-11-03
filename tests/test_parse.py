@@ -142,3 +142,15 @@ def test_clean_text_handles_control_characters():
     cleaned = clean_text(raw)
     assert "\n" not in cleaned
     assert "\t" not in cleaned
+
+
+def test_postal_label_does_not_become_recipient():
+    raw = "山东聊城东昌府聊城大学东区5号楼5单元803 张三 15900001234 邮编102206"
+    result = parse_address(raw)
+
+    assert result["province"] == "山东省"
+    assert result["city"] == "聊城市"
+    assert result["district"] == "东昌府区"
+    assert result["recipient"] == "张三"
+    assert "张三" not in (result["street"] or "")
+    assert result["postal_mismatch"] is True
