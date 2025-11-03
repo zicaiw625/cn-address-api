@@ -152,5 +152,6 @@ def test_postal_label_does_not_become_recipient():
     assert result["city"] == "聊城市"
     assert result["district"] == "东昌府区"
     assert result["recipient"] == "张三"
+    assert "聊城大学" in (result["street"] or "")
     assert "张三" not in (result["street"] or "")
     assert result["postal_mismatch"] is True

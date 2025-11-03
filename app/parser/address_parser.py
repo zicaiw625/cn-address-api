@@ -409,14 +409,17 @@ def _strip_leading_tokens(text: str, tokens: List[str]) -> str:
 
     sorted_tokens = sorted({t for t in tokens if t}, key=len, reverse=True)
     work = text
-    stripped = True
-    while stripped and work:
-        stripped = False
-        for token in sorted_tokens:
+    while sorted_tokens and work:
+        removed = False
+        for idx, token in enumerate(sorted_tokens):
             if work.startswith(token):
                 work = work[len(token):]
-                stripped = True
+                work = work.lstrip()
+                sorted_tokens.pop(idx)
+                removed = True
                 break
+        if not removed:
+            break
     return work
 
 
