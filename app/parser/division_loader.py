@@ -22,64 +22,6 @@ _COMMON_SUFFIXES = [
     "州",
 ]
 
-_MANUAL_ALIAS_OVERRIDES = [
-    {
-        "alias": "北京沙河",
-        "info": {
-            "level": "district",
-            "province": "北京市",
-            "city": "北京市",
-            "district": "昌平区",
-            "postal_code": "102200",
-            "lat": 40.22066,
-            "lng": 116.231204,
-        },
-    },
-]
-
-_MANUAL_POSTAL_OVERRIDES = {
-    "102206": {
-        "province": "北京市",
-        "city": "北京市",
-        "district": "昌平区",
-        "postal_code": "102206",
-        "lat": 40.22066,
-        "lng": 116.231204,
-    },
-}
-
-_NON_MAINLAND_PROVINCES = {
-    "香港岛",
-    "九龙",
-    "新界",
-    "澳门半岛",
-    "氹仔岛",
-    "路环岛",
-    "彰化县",
-    "嘉义市",
-    "嘉义县",
-    "新竹市",
-    "新竹县",
-    "花莲县",
-    "高雄市",
-    "基隆市",
-    "金门县",
-    "连江县",
-    "苗栗县",
-    "南海岛",
-    "南投县",
-    "新北市",
-    "澎湖县",
-    "屏东县",
-    "台中市",
-    "台南市",
-    "台北市",
-    "台东县",
-    "桃园市",
-    "宜兰县",
-    "云林县",
-}
-
 
 def _generate_aliases(name: str) -> List[str]:
     """
@@ -141,7 +83,12 @@ def load_divisions_tree() -> Dict[str, Any]:
 
 def _build_indexes_from_tree(
     tree: Dict[str, Any]
-) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
+) -> Tuple[
+    Dict[str, List[Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+    Dict[str, List[Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+]:
     """
     alias_index:
         口语简称 -> 多个候选行政区 {level, province, city, district, postal_code, lat, lng}
@@ -158,11 +105,11 @@ def _build_indexes_from_tree(
     """
     alias_index: Dict[str, List[Dict[str, Any]]] = {}
     postal_index: Dict[str, Dict[str, Any]] = {}
+    postal_prefix_index: Dict[str, List[Dict[str, Any]]] = {}
+    province_postal_index: Dict[str, Dict[str, Any]] = {}
 
     for prov_name, prov_obj in tree.items():
         if not isinstance(prov_obj, dict):
-            continue
-        if prov_name in _NON_MAINLAND_PROVINCES:
             continue
 
         prov_aliases = _generate_aliases(prov_name)
@@ -227,7 +174,7 @@ def _build_indexes_from_tree(
                     )
 
                 if postal_code and postal_code not in postal_index:
-                    postal_index[postal_code] = {
+                    postal_entry = {
                         "province": prov_name,
                         "city": city_name,
                         "district": dist_name,
@@ -235,24 +182,35 @@ def _build_indexes_from_tree(
                         "lat": lat,
                         "lng": lng,
                     }
+                    postal_index[postal_code] = postal_entry
 
-    return alias_index, postal_index
+                if postal_code:
+                    prefix = postal_code[:3]
+                    postal_prefix_index.setdefault(prefix, []).append(
+                        {
+                            "province": prov_name,
+                            "city": city_name,
+                            "district": dist_name,
+                            "postal_code": postal_code,
+                            "lat": lat,
+                            "lng": lng,
+                        }
+                    )
+
+                    province_postal_index.setdefault(prov_name, postal_entry)
+
+    return alias_index, postal_index, postal_prefix_index, province_postal_index
 
 
 @lru_cache()
-def get_indexes() -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
+def get_indexes() -> Tuple[
+    Dict[str, List[Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+    Dict[str, List[Dict[str, Any]]],
+    Dict[str, Dict[str, Any]],
+]:
     tree = load_divisions_tree()
-    alias_index, postal_index = _build_indexes_from_tree(tree)
-
-    for override in _MANUAL_ALIAS_OVERRIDES:
-        alias = override["alias"]
-        info = override["info"]
-        alias_index.setdefault(alias, []).append(info)
-
-    for postal_code, info in _MANUAL_POSTAL_OVERRIDES.items():
-        postal_index.setdefault(postal_code, info)
-
-    return alias_index, postal_index
+    return _build_indexes_from_tree(tree)
 
 
 def build_aliases_for_names(
