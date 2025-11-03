@@ -48,6 +48,38 @@ _MANUAL_POSTAL_OVERRIDES = {
     },
 }
 
+_NON_MAINLAND_PROVINCES = {
+    "香港岛",
+    "九龙",
+    "新界",
+    "澳门半岛",
+    "氹仔岛",
+    "路环岛",
+    "彰化县",
+    "嘉义市",
+    "嘉义县",
+    "新竹市",
+    "新竹县",
+    "花莲县",
+    "高雄市",
+    "基隆市",
+    "金门县",
+    "连江县",
+    "苗栗县",
+    "南海岛",
+    "南投县",
+    "新北市",
+    "澎湖县",
+    "屏东县",
+    "台中市",
+    "台南市",
+    "台北市",
+    "台东县",
+    "桃园市",
+    "宜兰县",
+    "云林县",
+}
+
 
 def _generate_aliases(name: str) -> List[str]:
     """
@@ -129,6 +161,8 @@ def _build_indexes_from_tree(
 
     for prov_name, prov_obj in tree.items():
         if not isinstance(prov_obj, dict):
+            continue
+        if prov_name in _NON_MAINLAND_PROVINCES:
             continue
 
         prov_aliases = _generate_aliases(prov_name)
