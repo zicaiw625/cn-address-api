@@ -81,3 +81,11 @@ def test_parse_taiwan_with_mainland_postal_flags_mismatch():
     assert result["province"] == "台南市"
     assert result["postal_code"] == "722001"
     assert result["postal_mismatch"] is True
+
+
+def test_parse_postal_adjacent_to_chinese_characters():
+    raw = "浙江省杭州市滨江区长河街道江南大道1234号XX科技园5幢402室 张三 15900001234 邮编310052号"
+    result = parse_address(raw)
+
+    assert result["postal_code"] == "310052"
+    assert result["postal_mismatch"] is False
