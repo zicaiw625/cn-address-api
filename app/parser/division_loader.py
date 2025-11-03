@@ -22,6 +22,32 @@ _COMMON_SUFFIXES = [
     "州",
 ]
 
+_MANUAL_ALIAS_OVERRIDES = [
+    {
+        "alias": "北京沙河",
+        "info": {
+            "level": "district",
+            "province": "北京市",
+            "city": "北京市",
+            "district": "昌平区",
+            "postal_code": "102200",
+            "lat": 40.22066,
+            "lng": 116.231204,
+        },
+    },
+]
+
+_MANUAL_POSTAL_OVERRIDES = {
+    "102206": {
+        "province": "北京市",
+        "city": "北京市",
+        "district": "昌平区",
+        "postal_code": "102206",
+        "lat": 40.22066,
+        "lng": 116.231204,
+    },
+}
+
 
 def _generate_aliases(name: str) -> List[str]:
     """
@@ -182,7 +208,17 @@ def _build_indexes_from_tree(
 @lru_cache()
 def get_indexes() -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
     tree = load_divisions_tree()
-    return _build_indexes_from_tree(tree)
+    alias_index, postal_index = _build_indexes_from_tree(tree)
+
+    for override in _MANUAL_ALIAS_OVERRIDES:
+        alias = override["alias"]
+        info = override["info"]
+        alias_index.setdefault(alias, []).append(info)
+
+    for postal_code, info in _MANUAL_POSTAL_OVERRIDES.items():
+        postal_index.setdefault(postal_code, info)
+
+    return alias_index, postal_index
 
 
 def build_aliases_for_names(
