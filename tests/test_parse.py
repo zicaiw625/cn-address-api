@@ -51,3 +51,24 @@ def test_parse_beijing_shahe_priority():
     # postal code should trust the user input once area matches
     assert result["postal_code"] == "102206"
     assert result["postal_mismatch"] is False
+
+
+def test_parse_wrong_postal_flags_mismatch():
+    raw = "河南郑州二七区庆丰街1号 410000"
+    result = parse_address(raw).model_dump()
+
+    assert result["province"] == "河南省"
+    assert result["city"] == "郑州市"
+    assert result["district"] == "二七区"
+    assert result["postal_code"] == "450000"
+    assert result["postal_mismatch"] is True
+
+
+def test_parse_generic_district_prefers_context():
+    raw = "安徽合肥白各庄新村东区5号楼5单元803 张三 1590000124 102206"
+    result = parse_address(raw).model_dump()
+
+    assert result["province"] == "安徽省"
+    assert result["city"] == "合肥市"
+    assert result["postal_mismatch"] is True
+    assert result["postal_code"] == "102206"
