@@ -12,7 +12,8 @@ from app.models import ParseResponse
 _DIRECT_MUNICIPALITIES = {"北京市", "上海市", "天津市", "重庆市"}
 
 _MOBILE_RE = re.compile(r"(1[3-9]\d{9})")
-_POSTAL_RE = re.compile(r"\b(\d{6})\b")
+# Postal code often sticks to Chinese chars, so use digit lookarounds instead of \b
+_POSTAL_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
 _NAME_MARKER_RE = re.compile(
     r"(?:收货?人|收件人|联系人|联络人|寄件人|取件人|收)\s*[:：]?\s*([\u4e00-\u9fa5]{2,4})(?:先生|女士|小姐|老师)?\s*$"
 )
