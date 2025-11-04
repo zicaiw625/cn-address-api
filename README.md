@@ -78,6 +78,61 @@ docker run -p 8000:8000 cn-address-api
 
 ---
 
+## Configuration & Authentication
+
+- Set `API_KEYS` to a comma-separated list of API tokens for direct clients. Example: `export API_KEYS="test123,anotherKey987"`.
+- When publishing on RapidAPI, copy the platform-provided proxy secret into `RAPIDAPI_PROXY_SECRET`. Multiple secrets can be comma-separated if you rotate credentials.
+- Local hacking without keys: explicitly opt-in by setting `ALLOW_KEYLESS_ACCESS=true`. Do **not** leave this enabled in production.
+- Direct requests must include `X-API-Key: <token>`. RapidAPI proxy calls are authenticated via `X-RapidAPI-Proxy-Secret`, which the platform injects automatically.
+
+Requests that fail authentication return:
+
+```json
+{
+  "error": "unauthorized",
+  "message": "Invalid or missing API credentials. Send header 'X-API-Key' or the RapidAPI-managed 'X-RapidAPI-Proxy-Secret'."
+}
+```
+
+---
+
+## Error Model
+
+All non-2xx responses share a consistent shape:
+
+```json
+{
+  "error": "validation_error",
+  "message": "Request body failed validation",
+  "request_id": "optional-correlation-id",
+  "details": {
+    "errors": [
+      {
+        "loc": ["body", "raw_address"],
+        "msg": "field required",
+        "type": "value_error.missing"
+      }
+    ]
+  }
+}
+```
+
+This matches the `ErrorResponse` schema advertised in the OpenAPI document, which RapidAPI will import automatically.
+
+---
+
+## RapidAPI Integration Checklist
+
+1. Deploy the service behind HTTPS and ensure the OpenAPI document is reachable (FastAPI exposes it at `/.well-known/openapi.json` by default).
+2. Configure environment variables in your runtime:
+   - `API_KEYS` for internal testing keys.
+   - `RAPIDAPI_PROXY_SECRET` with the secret generated in the RapidAPI dashboard.
+3. In the RapidAPI listing, document the required headers (`X-API-Key` for direct calls, Rapid will inject its own headers).
+4. Use the sample response/error payloads from this README in the marketplace documentation and tests.
+5. Consider capturing `X-RapidAPI-User` and `X-RapidAPI-Subscription` from `verify_api_key`’s dependency if you need per-subscriber logging or rate limiting.
+
+---
+
 ## Project layout
 
 ```text
