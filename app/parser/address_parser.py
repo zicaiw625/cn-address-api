@@ -90,6 +90,53 @@ _ADDRESS_SUFFIXES = (
 _BUILDING_LEVEL_RE = re.compile(r"(号楼|幢|栋|楼)")
 _UNIT_LEVEL_RE = re.compile(r"(单元|室|(?<!号)号(?!楼))")
 _NAME_BLACKLIST = {"邮编", "邮政编码", "邮政代号", "邮编号码"}
+_PROTECTED_ORG_PREFIXES = (
+    "大学",
+    "学院",
+    "学校",
+    "中学",
+    "小学",
+    "幼儿园",
+    "职高",
+    "职中",
+    "职院",
+    "医学院",
+    "医院",
+    "附属医院",
+    "附属中学",
+    "附属小学",
+)
+_NUMERAL_PREFIX_RE = re.compile(r"^第?[零一二三四五六七八九十百千万两0-9]+")
+
+
+def _should_preserve_org_prefix(text: str) -> bool:
+    if not text:
+        return False
+
+    trimmed = text.lstrip()
+    if not trimmed:
+        return False
+
+    candidates = [trimmed]
+
+    ordinal_match = _NUMERAL_PREFIX_RE.match(trimmed)
+    if ordinal_match:
+        remainder = trimmed[ordinal_match.end():]
+        if remainder:
+            candidates.append(remainder)
+
+    for candidate in list(candidates):
+        if candidate.startswith("附属"):
+            tail = candidate[2:]
+            if tail:
+                candidates.append(tail)
+
+    for candidate in candidates:
+        for prefix in _PROTECTED_ORG_PREFIXES:
+            if candidate.startswith(prefix):
+                return True
+
+    return False
 
 _MAINLAND_PROVINCE_KEYWORDS = [
     "省", "市", "自治区", "维吾尔自治区", "壮族自治区", "回族自治区", "内蒙古自治区", "特别行政区",
@@ -413,8 +460,11 @@ def _strip_leading_tokens(text: str, tokens: List[str]) -> str:
         removed = False
         for idx, token in enumerate(sorted_tokens):
             if work.startswith(token):
-                work = work[len(token):]
-                work = work.lstrip()
+                remainder = work[len(token):]
+                remainder_stripped = remainder.lstrip()
+                if _should_preserve_org_prefix(remainder_stripped):
+                    continue
+                work = remainder_stripped
                 sorted_tokens.pop(idx)
                 removed = True
                 break

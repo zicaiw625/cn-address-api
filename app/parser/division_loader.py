@@ -22,6 +22,13 @@ _COMMON_SUFFIXES = [
     "州",
 ]
 
+_MANUAL_ALIASES = {
+    "内蒙古自治区": ["内蒙"],
+    "广西壮族自治区": ["广西"],
+    "宁夏回族自治区": ["宁夏"],
+    "新疆维吾尔自治区": ["新疆"],
+}
+
 
 def _generate_aliases(name: str) -> List[str]:
     """
@@ -37,6 +44,12 @@ def _generate_aliases(name: str) -> List[str]:
     for suf in sorted(_COMMON_SUFFIXES, key=len, reverse=True):
         if name.endswith(suf) and len(name) > len(suf):
             aliases.add(name[: -len(suf)])
+
+    if name in _MANUAL_ALIASES:
+        for manual in _MANUAL_ALIASES[name]:
+            if manual:
+                aliases.add(manual)
+
     # 过滤太短（如单字“市”、“区”）
     aliases = {a for a in aliases if len(a) >= 2}
     return list(aliases)
@@ -231,6 +244,8 @@ def build_aliases_for_names(
         for suf in sorted(_COMMON_SUFFIXES, key=len, reverse=True):
             if n.endswith(suf) and len(n) > len(suf):
                 alias_set.add(n[: -len(suf)])
+        if n in _MANUAL_ALIASES:
+            alias_set.update(_MANUAL_ALIASES[n])
 
     # 去掉太短的别名
     alias_list = [a for a in alias_set if len(a) >= 2]
